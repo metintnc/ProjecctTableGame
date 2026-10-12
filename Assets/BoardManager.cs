@@ -2,6 +2,7 @@
 using System.Collections.Generic;
 using UnityEngine;
 
+
 public class BoardManager : MonoBehaviour
 {
     [Header("Board Settings")]
@@ -71,12 +72,80 @@ public class BoardManager : MonoBehaviour
     // HEDEF SAYI
     // -----------------------------
 
+
     void GenerateNewTarget()
     {
-        targetNumber = Random.Range(
-            minTargetNumber,
-            maxTargetNumber + 1
-        );
+        List<int> availableTargets = new List<int>();
+
+        // Hedef olarak 4-10 arasýndaki sayýlarý deðerlendir.
+        for (int number = minTargetNumber;
+             number <= maxTargetNumber;
+             number++)
+        {
+            bool existsOnBoard = false;
+
+            // Sayý tahtada var mý kontrol et.
+            if (board != null)
+            {
+                for (int row = 0; row < rows; row++)
+                {
+                    for (int col = 0; col < columns; col++)
+                    {
+                        if (board[row, col] == number)
+                        {
+                            existsOnBoard = true;
+                            break;
+                        }
+                    }
+
+                    if (existsOnBoard)
+                        break;
+                }
+            }
+
+            // Tahtada bulunmayan sayýlarý aday olarak ekle.
+            if (!existsOnBoard)
+            {
+                availableTargets.Add(number);
+            }
+        }
+
+        if (availableTargets.Count > 0)
+        {
+            targetNumber = availableTargets[
+                Random.Range(0, availableTargets.Count)
+            ];
+        }
+        else
+        {
+            // Uygun hedef yoksa aralýðý geniþlet.
+            targetNumber = maxTargetNumber + 1;
+
+            while (true)
+            {
+                bool existsOnBoard = false;
+
+                for (int row = 0; row < rows; row++)
+                {
+                    for (int col = 0; col < columns; col++)
+                    {
+                        if (board[row, col] == targetNumber)
+                        {
+                            existsOnBoard = true;
+                            break;
+                        }
+                    }
+
+                    if (existsOnBoard)
+                        break;
+                }
+
+                if (!existsOnBoard)
+                    break;
+
+                targetNumber++;
+            }
+        }
 
         Debug.Log("Yeni hedef sayý: " + targetNumber);
     }
