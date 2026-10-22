@@ -1,3 +1,4 @@
+using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
 
@@ -29,6 +30,12 @@ public class BoardManager : MonoBehaviour
     [Header("Swipe Settings")]
     public float swipeThreshold = 40f;
 
+    [Header("Swipe Animation")]
+    [Min(0.01f)] public float swipeAnimationDuration = 0.14f;
+
+    [Header("Gravity Animation")]
+    [Min(0.01f)] public float gravityAnimationDuration = 0.18f;
+
     private const int DesiredNumberCount = 4;
 
     // 0 = empty cell.
@@ -41,6 +48,7 @@ public class BoardManager : MonoBehaviour
 
     private Vector2 pointerStart;
     private bool trackingPointer;
+    private bool isAnimating;
 
     private Camera mainCamera;
     private Sprite squareSprite;
@@ -71,6 +79,9 @@ public class BoardManager : MonoBehaviour
 
     private void Update()
     {
+        if (isAnimating)
+            return;
+
         HandleSwipeInput();
     }
 
@@ -413,35 +424,60 @@ public class BoardManager : MonoBehaviour
             targetCol < 0 || targetCol >= columns)
             return;
 
+        if (board[row, col] == 0)
+            return;
+
+        StartCoroutine(AnimateSwipeMove(row, col, targetRow, targetCol));
+    }
+
+    private IEnumerator AnimateSwipeMove(int row, int col, int targetRow, int targetCol)
+    {
+        isAnimating = true;
+
         int movingNumber = board[row, col];
         int targetCellNumber = board[targetRow, targetCol];
+        TextMesh movingText = numberTexts[row, col];
 
-        if (movingNumber == 0)
-            return;
+        // Animate the swiped number toward the neighboring cell before applying the move.
+        if (movingText != null)
+        {
+            Vector3 startPosition = movingText.transform.localPosition;
+            Vector3 destination = GetCellPosition(targetRow, targetCol);
+            float elapsed = 0f;
+            float duration = Mathf.Max(0.01f, swipeAnimationDuration);
+
+            while (elapsed < duration)
+            {
+                elapsed += Time.deltaTime;
+                float t = Mathf.Clamp01(elapsed / duration);
+                float easedT = t * t * (3f - 2f * t);
+                movingText.transform.localPosition = Vector3.Lerp(startPosition, destination, easedT);
+                yield return null;
+            }
+
+            movingText.transform.localPosition = destination;
+        }
 
         if (targetCellNumber == 0)
         {
-            // Move into an empty neighboring cell.
             board[targetRow, targetCol] = movingNumber;
             board[row, col] = 0;
 
-            numberTexts[targetRow, targetCol] = numberTexts[row, col];
+            numberTexts[targetRow, targetCol] = movingText;
             numberTexts[row, col] = null;
-            SetNumberTextPosition(targetRow, targetCol);
 
-            // Kaydýrýlan sayý bu hamlenin yerçekimi iþleminden etkilenmez.
+            isAnimating = false;
             CompleteValidMove(targetRow, targetCol, row, col);
-            return;
+            yield break;
         }
 
         int result = movingNumber > targetCellNumber
             ? movingNumber - targetCellNumber
             : movingNumber + targetCellNumber;
 
-        if (numberTexts[targetRow, targetCol] != null)
-            Destroy(numberTexts[targetRow, targetCol].gameObject);
-
-        TextMesh movingText = numberTexts[row, col];
+        TextMesh targetTextMesh = numberTexts[targetRow, targetCol];
+        if (targetTextMesh != null)
+            Destroy(targetTextMesh.gameObject);
 
         board[row, col] = 0;
         numberTexts[row, col] = null;
@@ -456,7 +492,6 @@ public class BoardManager : MonoBehaviour
 
             GenerateNewTarget();
             UpdateTargetText();
-
             Debug.Log("Hedefe ulaþýldý! Yeni hedef: " + targetNumber);
         }
         else
@@ -465,16 +500,12 @@ public class BoardManager : MonoBehaviour
             numberTexts[targetRow, targetCol] = movingText;
 
             if (movingText != null)
-            {
                 movingText.text = result.ToString();
-                SetNumberTextPosition(targetRow, targetCol);
-            }
             else
-            {
                 CreateNumberText(targetRow, targetCol, result);
-            }
         }
 
+        isAnimating = false;
         if (result == targetNumber)
             CompleteValidMove(-1, -1, row, col);
         else
@@ -489,27 +520,40 @@ public class BoardManager : MonoBehaviour
     {
         validMoveCount++;
 
-        // Swipe and merge are fully resolved before gravity is applied.
-        // Every second valid move, each eligible number falls at most one cell.
+        // Swipe and math are resolved first. Every second valid move, run
+        // gravity as an animation and block new input until it finishes.
         if (validMoveCount % 2 == 0)
-            ApplyGravity();
+        {
+            StartCoroutine(ApplyGravityAnimated());
+            return;
+        }
 
-        // Keep exactly four numbers on the board. If a merge removes numbers,
-        // replenish from the highest available row until the count is restored.
         EnsureDesiredNumberCount();
         RefreshNumberTexts();
     }
 
-    private void ApplyGravity()
+    private IEnumerator ApplyGravityAnimated()
     {
+        isAnimating = true;
+
         int[,] oldBoard = (int[,])board.Clone();
         int[,] newBoard = (int[,])board.Clone();
         TextMesh[,] oldTexts = (TextMesh[,])numberTexts.Clone();
         TextMesh[,] newTexts = new TextMesh[rows, columns];
+        Vector3[,] startPositions = new Vector3[rows, columns];
 
-        // Row 0 is the bottom row. Gravity runs only after the swipe and any
-        // addition/subtraction have completely finished. Each number can fall
-        // at most one cell, based on the board state at the start of gravity.
+        // Record each number's current position before changing the board.
+        for (int row = 0; row < rows; row++)
+        {
+            for (int col = 0; col < columns; col++)
+            {
+                if (oldTexts[row, col] != null)
+                    startPositions[row, col] = oldTexts[row, col].transform.localPosition;
+            }
+        }
+
+        // Row 0 is the bottom row. Each number falls at most one cell,
+        // based on the board state at the start of this gravity step.
         for (int row = 1; row < rows; row++)
         {
             for (int col = 0; col < columns; col++)
@@ -522,7 +566,7 @@ public class BoardManager : MonoBehaviour
             }
         }
 
-        // Keep each TextMesh attached to its number, including duplicate values.
+        // Keep TextMesh objects attached to their numbers, even when values repeat.
         for (int row = 0; row < rows; row++)
         {
             for (int col = 0; col < columns; col++)
@@ -541,11 +585,50 @@ public class BoardManager : MonoBehaviour
         board = newBoard;
         numberTexts = newTexts;
 
+        float elapsed = 0f;
+        float duration = Mathf.Max(0.01f, gravityAnimationDuration);
+
+        while (elapsed < duration)
+        {
+            elapsed += Time.deltaTime;
+            float t = Mathf.Clamp01(elapsed / duration);
+            // Smooth start and stop for a more natural falling motion.
+            float easedT = t * t * (3f - 2f * t);
+
+            for (int oldRow = 0; oldRow < rows; oldRow++)
+            {
+                for (int col = 0; col < columns; col++)
+                {
+                    TextMesh text = oldTexts[oldRow, col];
+                    if (text == null || oldBoard[oldRow, col] == 0)
+                        continue;
+
+                    int destinationRow = oldRow;
+                    if (oldRow > 0 && oldBoard[oldRow - 1, col] == 0)
+                        destinationRow = oldRow - 1;
+
+                    Vector3 destination = GetCellPosition(destinationRow, col);
+                    text.transform.localPosition = Vector3.Lerp(
+                        startPositions[oldRow, col], destination, easedT);
+                }
+            }
+
+            yield return null;
+        }
+
+        // Snap precisely to final cell positions when the animation completes.
         for (int row = 0; row < rows; row++)
         {
             for (int col = 0; col < columns; col++)
-                SetNumberTextPosition(row, col);
+            {
+                if (numberTexts[row, col] != null)
+                    numberTexts[row, col].transform.localPosition = GetCellPosition(row, col);
+            }
         }
+
+        EnsureDesiredNumberCount();
+        RefreshNumberTexts();
+        isAnimating = false;
     }
 
     // -----------------------------
