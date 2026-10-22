@@ -476,26 +476,97 @@ public class BoardManager : MonoBehaviour
             : movingNumber + targetCellNumber;
 
         TextMesh targetTextMesh = numberTexts[targetRow, targetCol];
-        if (targetTextMesh != null)
-            Destroy(targetTextMesh.gameObject);
+        bool reachedTarget = result == targetNumber;
 
         board[row, col] = 0;
         numberTexts[row, col] = null;
 
-        if (result == targetNumber)
+        if (reachedTarget)
         {
+            // Remove the destination cell's old number immediately. Otherwise
+            // its TextMesh and the moving result are both visible during the
+            // success animation, making it look like two numbers appeared.
+            if (targetTextMesh != null)
+                Destroy(targetTextMesh.gameObject);
+
+            // Show the final arithmetic result on the board and keep the old
+            // target label visible briefly, so the player can recognize the match.
+            board[targetRow, targetCol] = result;
+            numberTexts[targetRow, targetCol] = movingText;
+
+            if (movingText == null)
+            {
+                CreateNumberText(targetRow, targetCol, result);
+                movingText = numberTexts[targetRow, targetCol];
+            }
+            else
+            {
+                movingText.text = result.ToString();
+            }
+
+            Vector3 originalScale = movingText != null
+                ? movingText.transform.localScale : Vector3.one;
+            Color originalColor = movingText != null
+                ? movingText.color : numberColor;
+            float celebrationDuration = 0.48f;
+            float elapsed = 0f;
+
+            // Pop/bounce animation: enlarge, then shrink away.
+            while (elapsed < celebrationDuration)
+            {
+                elapsed += Time.deltaTime;
+                float t = Mathf.Clamp01(elapsed / celebrationDuration);
+                float scale;
+                if (t < 0.45f)
+                {
+                    float popT = t / 0.45f;
+                    scale = Mathf.Lerp(1f, 1.45f, popT);
+                }
+                else
+                {
+                    float vanishT = (t - 0.45f) / 0.55f;
+                    scale = Mathf.Lerp(1.45f, 0.05f, vanishT);
+                }
+
+                if (movingText != null)
+                {
+                    movingText.transform.localScale = originalScale * scale;
+                    movingText.color = Color.Lerp(originalColor, Color.white,
+                        Mathf.Sin(t * Mathf.PI));
+                }
+
+                // Briefly emphasize the target label, then fade it out at the end.
+                if (targetText != null)
+                {
+                    targetText.transform.localScale = Vector3.one * (1f + 0.12f * Mathf.Sin(t * Mathf.PI));
+                    Color labelColor = numberColor;
+                    labelColor.a = t > 0.7f ? 1f - ((t - 0.7f) / 0.3f) : 1f;
+                    targetText.color = labelColor;
+                }
+
+                yield return null;
+            }
+
             if (movingText != null)
                 Destroy(movingText.gameObject);
 
             board[targetRow, targetCol] = 0;
             numberTexts[targetRow, targetCol] = null;
 
+            // Only switch to the next target after the success animation.
+            if (targetText != null)
+            {
+                targetText.transform.localScale = Vector3.one;
+                targetText.color = numberColor;
+            }
             GenerateNewTarget();
-            UpdateTargetText();
             Debug.Log("Hedefe ulaþýldý! Yeni hedef: " + targetNumber);
         }
         else
         {
+            if (targetTextMesh != null)
+                Destroy(targetTextMesh.gameObject);
+
             board[targetRow, targetCol] = result;
             numberTexts[targetRow, targetCol] = movingText;
 
@@ -506,7 +577,7 @@ public class BoardManager : MonoBehaviour
         }
 
         isAnimating = false;
-        if (result == targetNumber)
+        if (reachedTarget)
             CompleteValidMove(-1, -1, row, col);
         else
             CompleteValidMove(targetRow, targetCol, row, col);
