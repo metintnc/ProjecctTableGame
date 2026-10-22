@@ -46,6 +46,11 @@ public class BoardManager : MonoBehaviour
     private int previousTargetNumber = int.MinValue;
     private TextMesh targetText;
 
+    [Header("Scoring")]
+    public int totalScore;
+    private int movesSinceLastTarget;
+    private TextMesh scoreText;
+
     private Vector2 pointerStart;
     private bool trackingPointer;
     private bool isAnimating;
@@ -72,9 +77,11 @@ public class BoardManager : MonoBehaviour
         CreateBoard();
         GenerateNewTarget();
         CreateTargetText();
+        CreateScoreText();
         FillBoardWithStartingNumbers();
 
         UpdateTargetText();
+        UpdateScoreText();
     }
 
     private void Update()
@@ -175,6 +182,45 @@ public class BoardManager : MonoBehaviour
     {
         if (targetText != null)
             targetText.text = "HEDEF: " + targetNumber;
+    }
+
+    private void CreateScoreText()
+    {
+        GameObject scoreObject = new GameObject("ScoreText");
+        scoreObject.transform.SetParent(transform, false);
+
+        float topY = ((rows - 1) * (cellSize + spacing)) / 2f
+                     + cellSize * 0.85f + 0.75f;
+        scoreObject.transform.localPosition = new Vector3(0f, topY, -0.2f);
+
+        scoreText = scoreObject.AddComponent<TextMesh>();
+        scoreText.text = "PUAN: " + totalScore;
+        scoreText.fontSize = 64;
+        scoreText.characterSize = 0.10f;
+        scoreText.anchor = TextAnchor.MiddleCenter;
+        scoreText.alignment = TextAlignment.Center;
+        scoreText.color = numberColor;
+        scoreText.fontStyle = FontStyle.Bold;
+        scoreObject.GetComponent<MeshRenderer>().sortingOrder = 5;
+    }
+
+    private void UpdateScoreText()
+    {
+        if (scoreText != null)
+            scoreText.text = "PUAN: " + totalScore;
+    }
+
+    private void AwardTargetScore()
+    {
+        // Include the swipe that completed this target. Integer division
+        // intentionally removes decimals from the awarded points.
+        int movesUsed = Mathf.Max(1, movesSinceLastTarget + 1);
+        int pointsEarned = targetNumber / movesUsed;
+        totalScore += pointsEarned;
+        UpdateScoreText();
+
+        Debug.Log("Hedef tamamlandý: " + targetNumber + " / " + movesUsed
+                  + " hamle = " + pointsEarned + " puan. Toplam: " + totalScore);
     }
 
     // -----------------------------
@@ -467,7 +513,7 @@ public class BoardManager : MonoBehaviour
             numberTexts[row, col] = null;
 
             isAnimating = false;
-            CompleteValidMove(targetRow, targetCol, row, col);
+            CompleteValidMove(targetRow, targetCol, row, col, false);
             yield break;
         }
 
@@ -483,6 +529,8 @@ public class BoardManager : MonoBehaviour
 
         if (reachedTarget)
         {
+            AwardTargetScore();
+
             // Remove the destination cell's old number immediately. Otherwise
             // its TextMesh and the moving result are both visible during the
             // success animation, making it look like two numbers appeared.
@@ -578,18 +626,24 @@ public class BoardManager : MonoBehaviour
 
         isAnimating = false;
         if (reachedTarget)
-            CompleteValidMove(-1, -1, row, col);
+            CompleteValidMove(-1, -1, row, col, true);
         else
-            CompleteValidMove(targetRow, targetCol, row, col);
+            CompleteValidMove(targetRow, targetCol, row, col, false);
     }
 
     private void CompleteValidMove(
         int protectedRow,
         int protectedCol,
         int swipedRow,
-        int swipedCol)
+        int swipedCol,
+        bool targetCompleted)
     {
         validMoveCount++;
+
+        if (targetCompleted)
+            movesSinceLastTarget = 0;
+        else
+            movesSinceLastTarget++;
 
         // Swipe and math are resolved first. Every second valid move, run
         // gravity as an animation and block new input until it finishes.
